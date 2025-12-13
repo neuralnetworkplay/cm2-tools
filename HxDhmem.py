@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import base64 as b64
 import deflate as df
 import binascii
@@ -10,6 +10,7 @@ from itertools import chain,repeat
 import json
 import qrcode
 import base64 as b64
+import math
 k=0
 # version  v40.7.11
 # debug log:
@@ -18,6 +19,21 @@ k=0
 # v40.7.9: added rle encoding unfinished
 # v40.7.10.1: finished rle encoding
 # v40.7.11: i finished the program
+instruction_set={0x1: ('LDI',2),
+                 0x2: ('MOV',2),
+                 0x3: ('ADD',3),
+                 0x4: ('SUB',3),
+                 0x5: ('MUL',3),
+                 0x6: ('SCR',2),
+                 0x7: ('AND',3),
+                 0x8: ('BOR',3),
+                 0x9: ('NOT',3),
+                 0xa: ('XOR',3),
+                 0xb: ('BEZ',2),
+                 0xc: ('REP',1),
+                 0xd: ('HLT',0),
+                 0xe: ('CMP',3),
+                 0xf: ('EOL',0)}
 
 EXTENDED_ENCODING = 'iso-8859-1'
 
@@ -50,6 +66,7 @@ root.grid_rowconfigure(1, weight=1)
 root.grid_columnconfigure(0, weight=1) 
 root.grid_columnconfigure(1, weight=1) 
 root.config(bg='black')
+
 
 
 sync_in_progress = False
@@ -301,6 +318,8 @@ labelint32_var = tk.StringVar(root, value="int32: N/A")
 labelint64_var = tk.StringVar(root, value="int64: N/A")
 labelunix_var = tk.StringVar(root, value="Unix stamp: N/A")
 labelfloat64_var = tk.StringVar(root, value="float64: N/A")
+label_disassembly_var=tk.StringVar(root,value='aaaaaaa')
+
 
 def get_selected():
     m = "int16: N/A"
@@ -319,6 +338,8 @@ def get_selected():
             
         bytes_selected = bytes.fromhex(j)
         length = len(bytes_selected)
+        
+
 
         if length <= 2:
             temp_bytes = bytes_selected.ljust(2, b'\x00')
@@ -350,6 +371,71 @@ def get_selected():
         m = n = o = p = q = "Error/N/A"
 
     return (m, n, o, p, q)
+main_frame=tk.Frame(root,bg='black',height=100,width=700)
+main_frame.grid(row=1, column=0, sticky='nsew')
+main_frame.configure(bg='black')
+
+main_frame.grid_rowconfigure(0, weight=1)
+main_frame.grid_columnconfigure(0, weight=3) 
+main_frame.grid_columnconfigure(1, weight=1) 
+hex_display = tk.Text(main_frame, wrap=tk.NONE, undo=True, maxundo=-1, state=tk.NORMAL,bg="#802783")
+
+hex_display.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
+hex_display.bind('<<Modified>>',sync_hex_to_text)
+def disassembly(hex_widget):
+    try:
+        start, end = hex_widget.tag_ranges(tk.SEL)
+        display_hex_selected = hex_widget.get(start, end)
+        j = display_hex_selected.replace(' ', '').replace('\n', '')
+        bytes_selected = bytes.fromhex(j)
+        length = len(bytes_selected)
+
+        fully_working_command = ''
+        if length and length % 8 == 0:
+            offset = 0
+            while offset < length:
+                name, op1, op2, op3 = struct.unpack('>HHHH', bytes_selected[offset:offset+8])
+                c = name
+                c_val = c & 0xf
+                if c_val == 0:
+                    offset += 8
+                    continue
+                instr_name, operands = instruction_set[c_val]
+                fully_working_command += (instr_name + ' ')
+                if operands >= 1:
+                    fully_working_command += str(op1) + ' '
+                if operands >= 2:
+                    fully_working_command += str(op2) + ' '
+                if operands >= 3:
+                    fully_working_command += str(op3) + ' '
+                fully_working_command += '\n'
+                offset += 8
+
+        # Show result in the UI label and the disassembly text box
+        if fully_working_command:
+            label_disassembly_var.set(fully_working_command.strip())
+            try:
+                disassembly_text.config(state=tk.NORMAL)
+                disassembly_text.delete('1.0', tk.END)
+                disassembly_text.insert(tk.END, fully_working_command)
+                disassembly_text.config(state=tk.DISABLED)
+            except Exception:
+                pass
+        else:
+            no_msg = 'No disassembly (selection empty or length not multiple of 8)'
+            label_disassembly_var.set(no_msg)
+            try:
+                disassembly_text.config(state=tk.NORMAL)
+                disassembly_text.delete('1.0', tk.END)
+                disassembly_text.insert(tk.END, no_msg)
+                disassembly_text.config(state=tk.DISABLED)
+            except Exception:
+                pass
+
+        return fully_working_command
+    except Exception as e:
+        label_disassembly_var.set(f'Error: {type(e).__name__}: {e}')
+        return None
 labelint16_var=tk.StringVar(root)
 labelint32_var=tk.StringVar(root)
 labelint64_var=tk.StringVar(root)
@@ -367,6 +453,7 @@ def update_text():
 control_frame = tk.Frame(root, pady=10, bg='SystemButtonFace')
 control_frame.grid(row=0, column=0,columnspan=8, sticky='ew') 
 control_frame.configure(bg='black')
+
 
 def rle_encode():
     start_time_us = time.perf_counter_ns() // 1000
@@ -389,7 +476,7 @@ def rle_encode():
     print(f"DEBUGNO {debug_print2_time}: RLE encoded data length: {len(rle_data)}")
 
 
-    with open('config_filenos.json', 'r') as f:
+    with open(r'C:\Users\Kraeon\cm2-tools\config_filenos.json', 'r') as f:
         config_data = json.load(f) # its json cuz yes
     
     current_k = int(config_data['fileno'])
@@ -469,21 +556,170 @@ def rle_decode():
     else:
         error_msg = f"Decode failed: Expected {expected_length} bytes but got {actual_length} bytes."
         messagebox.showerror('Decode Error', error_msg)
+
+
+def save_selection_as_image(event=None):
+    """Save the selected bytes in `hex_display` to an RGB image.
+
+    Group bytes into (R,G,B) triples. If length % 3 != 0, pad with 0x00.
+    Image width is chosen as ceil(sqrt(num_pixels)) and height computed accordingly.
+    """
+    try:
+        # Try hex_display first; if empty, look in other text widgets (user might have focus elsewhere)
+        start_end = hex_display.tag_ranges(tk.SEL)
+        selected_widget = hex_display
+        if not start_end:
+            for w in (text_display, b64_input_field):
+                tr = w.tag_ranges(tk.SEL)
+                if tr:
+                    start_end = tr
+                    selected_widget = w
+                    break
+
+        if not start_end:
+            messagebox.showinfo('Save Image', 'No selection. Please select some bytes in the hex pane and ensure it has focus.')
+            return
+
+        start, end = start_end
+        display_hex_selected = selected_widget.get(start, end)
+        j = display_hex_selected.replace(' ', '').replace('\n', '')
+        if not j:
+            messagebox.showinfo('Save Image', 'Selection is empty.')
+            return
+
+        data = bytes.fromhex(j)
+        # pad to multiple of 3
+        if len(data) % 3 != 0:
+            data += b'\x00' * (3 - (len(data) % 3))
+
+        pixels = [tuple(data[i:i+3]) for i in range(0, len(data), 3)]
+        num_pixels = len(pixels)
+        width = math.ceil(math.sqrt(num_pixels))
+        height = math.ceil(num_pixels / width)
+
+        try:
+            from PIL import Image
+        except Exception:
+            messagebox.showerror('Pillow required', 'Pillow is required for image export. Install it with "pip install pillow".')
+            return
+
+        img = Image.new('RGB', (width, height), (0, 0, 0))
+        px = img.load()
+        for idx, color in enumerate(pixels):
+            x = idx % width
+            y = idx // width
+            px[x, y] = color
+
+        save_path = filedialog.asksaveasfilename(defaultextension='.png', filetypes=[('PNG Image', '*.png'), ('All files', '*.*')])
+        if not save_path:
+            return
+
+        img.save(save_path)
+        messagebox.showinfo('Save Image', f'Saved image to {save_path}')
+
+    except Exception as e:
+        messagebox.showerror('Save Image Error', f'{type(e).__name__}: {e}')
+
+
+def load_image_to_hex(event=None):
+    """Load an image file and decode its pixels into bytes (row-major left-to-right, top-to-bottom).
+
+    Each pixel contributes three bytes (R,G,B). The resulting byte stream is placed into the hex display
+    and the text view is synchronized.
+    """
+    try:
+        try:
+            status_bar.config(text='Importing image...')
+        except Exception:
+            pass
+        try:
+            from PIL import Image
+        except Exception:
+            messagebox.showerror('Pillow required', 'Pillow is required for image import. Install it with "pip install pillow".')
+            return
+
+        path = filedialog.askopenfilename(title='Open image', filetypes=[('Image files', '*.png;*.jpg;*.bmp;*.gif'), ('All files', '*.*')])
+        if not path:
+            return
+
+        img = Image.open(path).convert('RGB')
+        pixels = list(img.getdata())
+        data = bytearray()
+        for r, g, b in pixels:
+            data.extend((r, g, b))
+
+        # Trim trailing zeros? Leave as-is; user can edit
+        raw_bytes = bytes(data)
+        # update the displays
+        hex_output, _ = bytes_to_display_format(raw_bytes)
+
+        hex_display.config(state=tk.NORMAL)
+        hex_display.delete('1.0', tk.END)
+        hex_display.insert('1.0', hex_output)
+        hex_display.edit_modified(False)
+
+        # also populate text_display via existing helper
+        bytes_to_display_format(raw_bytes, text_widget=text_display)
+
+        messagebox.showinfo('Import Image', f'Imported {len(raw_bytes)} bytes from image {path}')
+
+    except Exception as e:
+        messagebox.showerror('Import Image Error', f'{type(e).__name__}: {e}')
+    finally:
+        try:
+            status_bar.config(text='Ready.')
+        except Exception:
+            pass
+
+
+def save_full_memory_as_image(event=None):
+    """Save the entire `full_memory_bytes` buffer as an RGB image.
+
+    Default width is 256 unless the user selects a different width via a prompt.
+    """
+    try:
+        if not full_memory_bytes:
+            messagebox.showinfo('Save Image', 'No memory loaded. Use Get Memory first.')
+            return
+
+        # Ask for preferred width (default 256)
+        width = simpledialog.askinteger('Image Width', 'Enter desired image width in pixels:', initialvalue=256, minvalue=1)
+        if width is None:
+            return
+
+        data = bytes(full_memory_bytes)
+        # pad to multiple of 3
+        if len(data) % 3 != 0:
+            data += b'\x00' * (3 - (len(data) % 3))
+
+        pixels = [tuple(data[i:i+3]) for i in range(0, len(data), 3)]
+        num_pixels = len(pixels)
+        height = (num_pixels + width - 1) // width
+
+        try:
+            from PIL import Image
+        except Exception:
+            messagebox.showerror('Pillow required', 'Pillow is required for image export. Install it with "pip install pillow".')
+            return
+
+        img = Image.new('RGB', (width, height), (0, 0, 0))
+        px = img.load()
+        for idx, color in enumerate(pixels):
+            x = idx % width
+            y = idx // width
+            px[x, y] = color
+
+        save_path = filedialog.asksaveasfilename(defaultextension='.png', filetypes=[('PNG Image', '*.png'), ('All files', '*.*')], title='Save full memory as image')
+        if not save_path:
+            return
+
+        img.save(save_path)
+        messagebox.showinfo('Save Image', f'Saved full memory to {save_path} ({width}×{height})')
+
+    except Exception as e:
+        messagebox.showerror('Save Full Memory Error', f'{type(e).__name__}: {e}')
     
 
-main_frame=tk.Frame(root,bg='black',height=100,width=700)
-main_frame.grid(row=1, column=0, sticky='nsew')
-main_frame.configure(bg='black')
-
-main_frame.grid_rowconfigure(0, weight=1)
-main_frame.grid_columnconfigure(0, weight=1) 
-
-
-
-hex_display = tk.Text(main_frame, wrap=tk.NONE, undo=True, maxundo=-1, state=tk.NORMAL,bg="#802783")
-
-hex_display.grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
-hex_display.bind('<<Modified>>',sync_hex_to_text)
 
 
 
@@ -506,6 +742,17 @@ label_int64.grid(row=2, column=0, sticky='ew', padx=5, pady=2)
 label_unix.grid(row=3, column=0, sticky='ew', padx=5, pady=2)
 label_float64.grid(row=4, column=0, sticky='ew', padx=5, pady=2)
 
+# Disassembly output label (shows assembler output for the selected bytes)
+label_disasm = tk.Label(label_frame, textvariable=label_disassembly_var, anchor='w', fg='white', bg='black', justify='left', wraplength=400)
+label_disasm.grid(row=5, column=0, sticky='ew', padx=5, pady=2)
+
+# Read-only multi-line disassembly view (for longer output)
+disassembly_text = tk.Text(main_frame, height=6, wrap=tk.WORD, state=tk.DISABLED, bg='#111', fg='white')
+disassembly_text.grid(row=2, column=0, columnspan=2, sticky='ew', padx=5, pady=2)
+# Disassembly output label (shows assembler output for the selected bytes)
+label_disasm = tk.Label(label_frame, textvariable=label_disassembly_var, anchor='w', fg='white', bg='black', justify='left', wraplength=400)
+label_disasm.grid(row=5, column=0, sticky='ew', padx=5, pady=2)
+
 
 
 
@@ -526,12 +773,36 @@ rle_encode_button=tk.Button(control_frame,text='Save file compressed',command=rl
 rle_encode_button.grid(row=0,column=5,padx=5,pady=5)
 rle_decode_button=tk.Button(control_frame,text='Decode memory as RLE',command=rle_decode)
 rle_decode_button.grid(row=0,column=6,padx=5,pady=5)
+button_disassemble=tk.Button(control_frame,text='Disassemble selected text',command= lambda: disassembly(hex_display))
+button_disassemble.grid(row=0,column=7,padx=5,pady=5)
+save_image_button = tk.Button(control_frame, text='Save Selection as Image', command=save_selection_as_image)
+save_image_button.grid(row=0, column=8, padx=5, pady=5)
+load_image_button = tk.Button(control_frame, text='Load Image -> Hex', command=load_image_to_hex)
+load_image_button.grid(row=0, column=9, padx=5, pady=5)
+# Button to save entire memory as image
+save_full_image_button = tk.Button(control_frame, text='Save Full Memory as Image', command=save_full_memory_as_image)
+save_full_image_button.grid(row=0, column=10, padx=5, pady=5)
+# Keyboard shortcuts
+root.bind('<Control-i>', save_selection_as_image)   # Ctrl+I to save selection as image
+hex_display.bind('<Control-i>', save_selection_as_image)
+root.bind('<Control-Shift-d>', load_image_to_hex)  # Ctrl+Shift+D to load image into hex
+hex_display.bind('<Control-Shift-d>', load_image_to_hex)
+root.bind('<Control-Shift-D>', load_image_to_hex)
+hex_display.bind('<Control-Shift-D>', load_image_to_hex)
+# Bind globally to catch variants regardless of widget focus
+root.bind_all('<Control-Shift-d>', load_image_to_hex)
+root.bind_all('<Control-Shift-D>', load_image_to_hex)
+# Ctrl+Alt+I to save full memory as image
+root.bind_all('<Control-Alt-i>', save_full_memory_as_image)
+root.bind_all('<Control-Alt-I>', save_full_memory_as_image)
 root.grid_columnconfigure(0, weight=1)
 root.grid_columnconfigure(1, weight=1)
 root.grid_rowconfigure(1, weight=1)
 text_display = tk.Text(root, wrap=tk.NONE, undo=True, maxundo=-1, state=tk.NORMAL,bg="#6B3A6D")
-text_display.grid(row=1, column=1, padx=5, pady=5, sticky='nsew')
+text_display.grid(row=1, column=1, padx=5, pady=5, sticky='ns')
 text_display.bind('<<Modified>>', sync_text_to_hex)
+text_display.bind('<Control-i>', save_selection_as_image)
+text_display.bind('<Control-Shift-d>', load_image_to_hex)
 
 v_scrollbar = ttk.Scrollbar(root, orient=tk.VERTICAL, command=on_scroll)
 v_scrollbar.grid(row=1, column=2, sticky='ns', pady=5)
